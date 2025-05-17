@@ -445,6 +445,8 @@ public:
 
 	void* Get(uint32_t id);
 
+	void Destroy(rage::fwExtension* extension);
+
 private:
 	uintptr_t dummyVal;
 };
@@ -472,6 +474,11 @@ public:
 	inline void AddExtension(rage::fwExtension* extension)
 	{
 		return m_extensionList.Add(extension);
+	}
+
+	inline void DestroyExtension(rage::fwExtension* extension)
+	{
+		return m_extensionList.Destroy(extension);
 	}
 
 	template<typename T>

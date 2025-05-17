@@ -41,6 +41,11 @@ static hook::cdecl_stub<void(fwExtensionList*, rage::fwExtension*)> addExtension
 	return hook::get_pattern("48 8B 03 FF 50 18 83 F8 20 73 21", -0x2A);
 });
 
+static hook::cdecl_stub<void(fwExtensionList*, rage::fwExtension*)> destroyExtension([]()
+{
+	return hook::get_call(hook::get_pattern("E8 ? ? ? ? 49 3B EF 0F 8C"));
+});
+
 void fwExtensionList::Add(rage::fwExtension* extension)
 {
 	return addExtension(this, extension);
@@ -49,6 +54,11 @@ void fwExtensionList::Add(rage::fwExtension* extension)
 void* fwExtensionList::Get(uint32_t id)
 {
 	return getExtension(this, id);
+}
+
+void fwExtensionList::Destroy(rage::fwExtension* extension)
+{
+	return destroyExtension(this, extension);
 }
 
 static uint32_t* fwSceneUpdateExtension_classId;
