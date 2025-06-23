@@ -1,4 +1,4 @@
-﻿#include "StdInc.h"
+#include "StdInc.h"
 
 #include <ServerInstanceBase.h>
 
@@ -15,6 +15,22 @@
 #include <EASTL/bitset.h>
 
 #include "packethandlers/NetGameEventPacketHandler.h"
+
+NetGameEventPacketHandlerV2::NetGameEventPacketHandlerV2(fx::ServerInstanceBase* instance)
+{
+	static auto blockNetGameEvent = instance->AddCommand("block_net_game_event", [this](uint32_t event)
+	{
+		std::unique_lock lock(this->blockedEventsMutex);
+		this->blockedEvents.insert(event);
+	});
+
+	static auto allowNetGameEvent = instance->AddCommand("unblock_net_game_event", [this](uint32_t event)
+	{
+		std::unique_lock lock(this->blockedEventsMutex);
+		this->blockedEvents.erase(event);
+	});
+} 
+
 
 void NetGameEventPacketHandlerV2::RouteEvent(const fwRefContainer<fx::ServerGameStatePublic>& sgs, uint32_t bucket, const std::vector<uint16_t>& targetPlayers, const fwRefContainer<fx::ClientRegistry>& clientRegistry, const net::Buffer& data)
 {
@@ -34,22 +50,22 @@ void NetGameEventPacketHandlerV2::RouteEvent(const fwRefContainer<fx::ServerGame
 bool NetGameEventPacketHandlerV2::Process(fx::ServerInstanceBase* instance, const fx::ClientSharedPtr& client, net::ByteReader& reader, fx::ENetPacketPtr& packet)
 {
 	const uint64_t offset = reader.GetOffset();
-	gscomms_execute_callback_on_sync_thread([instance, client, offset, packet]
+	gscomms_execute_callback_on_sync_thread([instance, client, offset, packet, this]
 	{
 		net::ByteReader movedReader (packet->data, packet->dataLength);
 		movedReader.Seek(offset);
-		ProcessNetEvent(instance, client, movedReader);
+		ProcessNetEvent(instance, client, movedReader, this);
 		(void) packet;
 	});
 
 	return true;
 }
 
-bool NetGameEventPacketHandlerV2::ProcessNetEvent(fx::ServerInstanceBase* instance, const fx::ClientSharedPtr& client, net::ByteReader& reader)
+bool NetGameEventPacketHandlerV2::ProcessNetEvent(fx::ServerInstanceBase* instance, const fx::ClientSharedPtr& client, net::ByteReader& reader, NetGameEventPacketHandlerV2* handler)
 {
 	static size_t kServerMaxReplySize = net::SerializableComponent::GetMaxSize<net::packet::ServerNetGameEventV2Packet>();
 
-	return ProcessPacket(reader, [](net::packet::ClientNetGameEventV2& clientNetEvent, fx::ServerInstanceBase* instance, const fx::ClientSharedPtr& client)
+	return ProcessPacket(reader, [handler](net::packet::ClientNetGameEventV2& clientNetEvent, fx::ServerInstanceBase* instance, const fx::ClientSharedPtr& client)
 	{
 		auto sgs = instance->GetComponent<fx::ServerGameStatePublic>();
 
@@ -64,6 +80,12 @@ bool NetGameEventPacketHandlerV2::ProcessNetEvent(fx::ServerInstanceBase* instan
 		serverNetEvent.eventId = clientNetEvent.eventId;
 		serverNetEvent.isReply = clientNetEvent.isReply;
 		serverNetEvent.data = clientNetEvent.data;
+
+		std::shared_lock lock(handler->blockedEventsMutex);
+		if (handler->blockedEvents.find(serverNetEvent.eventNameHash) != handler->blockedEvents.end())
+		{
+			return;
+		}
 
 		net::Buffer routingBuffer(kServerMaxReplySize);
 		net::ByteWriter routingWriter{ const_cast<uint8_t*>(routingBuffer.GetBuffer()), kServerMaxReplySize };
